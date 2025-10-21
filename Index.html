@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+    <meta charset="utf-8">
+    <title></title>
+</head>
+<body>
+    
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GDMPerformance Global Rally 95</title>
+<style>
+body {margin:0;font-family:Orbitron,Arial;background:#000;color:#fff;overflow:hidden;}
+.hidden{display:none;}
+#builder,#menu,#hud,#mobileControls,#leaderboard{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;}
+#gameCanvas{width:100vw;height:100vh;display:block;background:#222;}
+#hud{align-items:flex-start;justify-content:flex-start;padding:10px;}
+#hud div{margin:3px;}
+#handbrakeIndicator{color:red;visibility:hidden;}
+#mobileControls{bottom:20px;flex-direction:row;justify-content:center;gap:10px;}
+#mobileControls button{padding:15px;font-size:20px;border:none;border-radius:10px;}
+#leaderboard{background:#000d;overflow:auto;}
+input,select{margin:3px;}
+</style>
+</head>
+<body>
+
+<!-- Car Builder -->
+<div id="builder">
+<h1>🛠 Car Builder</h1>
+<div><label>Engine: <select id="engineSelect">
+<option value="1.0">1.0L</option><option value="1.5">1.5L</option>
+<option value="2.0">2.0L</option><option value="2.5">2.5L</option>
+</select></label></div>
+<div><label>Max HP: <input type="number" id="maxHP" value="200"></label></div>
+<div><label>Max Torque (Nm): <input type="number" id="maxTorque" value="250"></label></div>
+<div><label>Max RPM: <input type="number" id="maxRPM" value="7000"></label></div>
+<div><label>Gears: <select id="gearsSelect">
+<option value="5">5</option><option value="6">6</option><option value="7">7</option>
+</select></label></div>
+<div><label>Final Drive Ratio: <input type="number" id="finalDrive" value="4.5" step="0.01"></label></div>
+<div><label>Camber (-5° to 5°): <input type="number" id="camber" value="0" step="0.1"></label></div>
+<div><label>Caster (-5° to 5°): <input type="number" id="caster" value="0" step="0.1"></label></div>
+<div><label>Ackerman (°): <input type="number" id="ackerman" value="0" step="0.1"></label></div>
+<div><label>Steering Angle (°): <input type="number" id="steeringAngle" value="30" step="0.5"></label></div>
+<div><label>Car Color: <input type="color" id="carColor" value="#ff0000"></label></div>
+<button id="builderNext">Proceed</button>
+</div>
+
+<!-- Main Menu -->
+<div id="menu" class="hidden">
+<h1>🏁 GDMPerformance Global Rally 95</h1>
+<p>Enter driver name</p>
+<input id="playerName" type="text" maxlength="20" placeholder="Driver">
+<button id="startBtn">Start Rally</button>
+<p>Sponsored by <b>GDMPerformance</b>, ApexLabs, HyperOil, ZeroPoint Fuel</p>
+</div>
+
+<!-- Canvas -->
+<canvas id="gameCanvas" class="hidden"></canvas>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+<div id="speed">Speed 0 km/h</div>
+<div id="rpm">RPM 0</div>
+<div id="torque">Torque 0 Nm</div>
+<div id="gear">Gear 1</div>
+<div id="surface">Surface: Tarmac</div>
+<div id="weather">Weather: Clear</div>
+<div id="pacenote">Ready…</div>
+<div id="handbrakeIndicator">Handbrake</div>
+<div id="damageHUD"></div>
+<div id="wheelSpinHUD"></div>
+</div>
+
+<!-- Mobile Controls -->
+<div id="mobileControls" class="hidden">
+<button id="btnLeft">←</button>
+<button id="btnRight">→</button>
+<button id="btnBrake">🛑</button>
+<button id="btnGas">🚀</button>
+<button id="btnHandbrake">🅿️</button>
+<button id="btnGearUp">⬆️</button>
+<button id="btnGearDown">⬇️</button>
+</div>
+
+<!-- Leaderboard -->
+<div id="leaderboard" class="hidden">
+<h2>🏆 Leaderboard</h2>
+<div id="entries"></div>
+<button id="restartBtn">Return to Menu</button>
+</div>
+
+<script type="module">
+// --- Firebase Setup ---
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-analytics.js";
+import { getDatabase, ref, push, onValue } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB5SOvGnif4ZuqO3RWEaUWk4jlLKHeCa9k",
+  authDomain: "gdmperformance-globalrally95.firebaseapp.com",
+  databaseURL: "https://gdmperformance-globalrally95-default-rtdb.firebaseio.com",
+  projectId: "gdmperformance-globalrally95",
+  storageBucket: "gdmperformance-globalrally95.firebasestorage.app",
+  messagingSenderId: "629400112349",
+  appId: "1:629400112349:web:b0675ad32358664b8b5f34",
+  measurementId: "G-VYR2YG5985"
+};
+
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const db = getDatabase(app);
+
+// --- Three.js & Game Variables ---
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170/build/three.module.js";
+
+let scene,camera,renderer,car,clock;
+let playerName="", gameActive=false;
+let input={throttle:0,brake:0,steer:0,handbrake:false,gearUp:false,gearDown:false};
+let speed=0,rpm=1000,torque=0,gear=1;
+let pacenotes=["Start — caution bump","Left 3 into right 2","Hairpin left handbrake","Flat right over crest","Square left — tightens","Finish!"];
+let pacenoteIndex=0;
+let damage={engine:0,suspensionL:0,suspensionR:0,shocks:0,tires:0,body:0};
+let wheelSpin=0,verticalVelocity=0,onGround=true;
+let objects=[];
+let carStats={engine:1.0,maxHP:200,maxTorque:250,maxRPM:7000,gears:5,finalDrive:4.5,camber:0,caster:0,ackerman:0,steeringAngle:30,color:"#ff0000"};
+
+// --- Surfaces & Dynamic Weather ---
+const surfaceSegments=[
+  {startZ:0,endZ:-50,type:"tarmac",grip:1.0},
+  {startZ:-50,endZ:-120,type:"gravel",grip:0.8},
+  {startZ:-120,endZ:-200,type:"mud",grip:0.6},
+  {startZ:-200,endZ:-250,type:"snow",grip:0.5}
+];
+let weather={type:"Clear",multiplier:1.0};
+let weatherTimer=0;
+
+// --- Builder/Menu ---
+document.getElementById("builderNext").onclick=()=>{
+  carStats.engine=parseFloat(document.getElementById("engineSelect").value);
+  carStats.maxHP=parseInt(document.getElementById("maxHP").value);
+  carStats.maxTorque=parseInt(document.getElementById("maxTorque").value);
+  carStats.maxRPM=parseInt(document.getElementById("maxRPM").value);
+  carStats.gears=parseInt(document.getElementById("gearsSelect").value);
+  carStats.finalDrive=parseFloat(document.getElementById("finalDrive").value);
+  carStats.camber=parseFloat(document.getElementById("camber").value);
+  carStats.caster=parseFloat(document.getElementById("caster").value);
+  carStats.ackerman=parseFloat(document.getElementById("ackerman").value);
+  carStats.steeringAngle=parseFloat(document.getElementById("steeringAngle").value);
+  carStats.color=document.getElementById("carColor").value;
+  document.getElementById("builder").classList.add("hidden");
+  document.getElementById("menu").classList.remove("hidden");
+};
+
+document.getElementById("startBtn").onclick=()=>{
+  playerName=document.getElementById("playerName").value||"Driver";
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("gameCanvas").classList.remove("hidden");
+  document.getElementById("hud").classList.remove("hidden");
+  document.getElementById("mobileControls").classList.remove("hidden");
+  gameActive=true; initGame();
+};
+
+// --- Leaderboard ---
+function saveLeaderboard(player,time){ push(ref(db,'leaderboard/'),{player,time,date:Date.now()}); }
+function showLeaderboard(){
+  const entries=document.getElementById("entries");
+  document.getElementById("leaderboard").classList.remove("hidden");
+  onValue(ref(db,'leaderboard/'),snap=>{
+    const data=snap.val()||{};
+    const list=Object.values(data).sort((a,b)=>a.time-b.time).slice(0,10);
+    entries.innerHTML=list.map((e,i)=>`<div>${i+1}. ${e.player} — ${e.time.toFixed(2)} s</div>`).join("");
+  });
+}
+document.getElementById("restartBtn").onclick=()=>{location.reload();};
+
+// --- Init Game ---
+function initGame(){
+  scene=new THREE.Scene();
+  camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1000);
+  renderer=new THREE.WebGLRenderer({canvas:document.getElementById("gameCanvas"),antialias:true});
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  clock=new THREE.Clock();
+
+  const geometry=new THREE.BoxGeometry(2,1,4);
+  const material=new THREE.MeshStandardMaterial({color:carStats.color});
+  car=new THREE.Mesh(geometry,material); scene.add(car);
+
+  const ground=new THREE.Mesh(new THREE.PlaneGeometry(500,500,10,10),new THREE.MeshStandardMaterial({color:0x444444}));
+  ground.rotation.x=-Math.PI/2; scene.add(ground);
+
+  for(let i=0;i<30;i++){
+    const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.2,2),new THREE.MeshStandardMaterial({color:0x8B4513}));
+    trunk.position.set(Math.random()*200-100,1,Math.random()*200-100); scene.add(trunk);
+    const leaves=new THREE.Mesh(new THREE.ConeGeometry(1.5,3,8),new THREE.MeshStandardMaterial({color:0x00ff00}));
+    leaves.position.set(trunk.position.x,3.5,trunk.position.z); scene.add(leaves);
+    objects.push({mesh:trunk,type:'tree'});
+  }
+
+  const light=new THREE.DirectionalLight(0xffffff,1); light.position.set(5,10,5); scene.add(light);
+  camera.position.set(0,5,10);
+  animate();
+}
+
+// --- Animate ---
+function animate(){
+  if(!gameActive) return;
+  requestAnimationFrame(animate);
+  const delta=clock.getDelta();
+  weatherTimer+=delta;
+  if(weatherTimer>30){weather.type="Rain"; weather.multiplier=0.8;}
+  if(weatherTimer>60){weather.type="Snow"; weather.multiplier=0.6;}
+
+  if(input.gearUp){gear=Math.min(carStats.gears,gear+1); input.gearUp=false;}
+  if(input.gearDown){gear=Math.max(1,gear-1); input.gearDown=false;}
+
+  let currentSurface=surfaceSegments.find(s=>car.position.z<=s.startZ && car.position.z>=s.endZ)||surfaceSegments[0];
+
+  rpm=Math.min(carStats.maxRPM,Math.max(1000,rpm+(input.throttle-input.brake)*200*delta));
+  torque=carStats.maxTorque*(1-rpm/carStats.maxRPM)*(gear/carStats.gears);
+  let suspensionEffect=1-Math.max(damage.suspensionL,damage.suspensionR)/100;
+  let tireGrip=(1-damage.tires/100)*suspensionEffect*currentSurface.grip*weather.multiplier;
+  speed+=((torque*carStats.finalDrive/1000)*tireGrip-speed*0.05)*delta;
+  speed=Math.max(0,Math.min(speed,200));
+
+  wheelSpin=Math.max(0,(torque*0.01-speed*0.02));
+  document.getElementById("wheelSpinHUD").innerText=`Wheel Slip: ${wheelSpin.toFixed(2)}`;
+
+  let steerEffect=input.steer*(1-suspensionEffect)*delta*0.5;
+  car.rotation.y-=steerEffect;
+  if(input.handbrake) car.rotation.y+=Math.sign(input.steer)*0.5*delta;
+  car.position.z-=speed*delta*0.1;
+
+  verticalVelocity-=9.81*delta;
+  if(car.position.y+verticalVelocity*delta<=0){
+    if(!onGround){
+      let impact=Math.abs(verticalVelocity);
+      if(impact>5){ damage.shocks+=Math.min(100,impact*5); damage.suspensionL+=Math.min(100,impact*3); damage.suspensionR+=Math.min(100,impact*3); }
+    }
+    onGround=true; verticalVelocity=0; car.position.y=0;
+  } else { car.position.y+=verticalVelocity*delta; onGround=false; }
+
+  objects.forEach(obj=>{
+    const dist=Math.hypot(car.position.x-obj.mesh.position.x, car.position.z-obj.mesh.position.z);
+    if(dist<2){ damage.body+=Math.random()*10; damage.suspensionL+=Math.random()*5; damage.suspensionR+=Math.random()*5; damage.tires+=Math.random()*5; speed*=0.7; car.position.x+=(car.position.x-obj.mesh.position.x)*0.1; car.position.z+=(car.position.z-obj.mesh.position.z)*0.1; }
+  });
+
+  if(damage.engine>90||damage.body>95){ alert("Car retired!"); gameActive=false; showLeaderboard(); return; }
+
+  document.getElementById("speed").innerText="Speed "+speed.toFixed(1)+" km/h";
+  document.getElementById("rpm").innerText="RPM "+rpm.toFixed(0);
+  document.getElementById("torque").innerText="Torque "+torque.toFixed(0)+" Nm";
+  document.getElementById("gear").innerText="Gear "+gear;
+  document.getElementById("handbrakeIndicator").style.visibility=input.handbrake?"visible":"hidden";
+  document.getElementById("damageHUD").innerText=`Engine:${damage.engine.toFixed(0)}% SuspensionL:${damage.suspensionL.toFixed(0)}% SuspensionR:${damage.suspensionR.toFixed(0)}% Shocks:${damage.shocks.toFixed(0)}% Tires:${damage.tires.toFixed(0)}% Body:${damage.body.toFixed(0)}%`;
+  document.getElementById("surface").innerText=`Surface: ${currentSurface.type}`;
+  document.getElementById("weather").innerText=`Weather: ${weather.type}`;
+  pacenoteIndex=Math.floor(car.position.z/-10); pacenoteIndex=Math.min(pacenotes.length-1,pacenoteIndex);
+  document.getElementById("pacenote").innerText=pacenotes[pacenoteIndex];
+
+  renderer.render(scene,camera);
+}
+
+// --- Input ---
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowUp") input.throttle=1;
+  if(e.key==="ArrowDown") input.brake=1;
+  if(e.key==="ArrowLeft") input.steer=1;
+  if(e.key==="ArrowRight") input.steer=-1;
+  if(e.key.toLowerCase()==="p") input.handbrake=true;
+  if(e.key.toLowerCase()==="w") input.gearUp=true;
+  if(e.key.toLowerCase()==="s") input.gearDown=true;
+});
+document.addEventListener("keyup",e=>{
+  if(e.key==="ArrowUp") input.throttle=0;
+  if(e.key==="ArrowDown") input.brake=0;
+  if(e.key==="ArrowLeft"||e.key==="ArrowRight") input.steer=0;
+  if(e.key.toLowerCase()==="p") input.handbrake=false;
+});
+document.getElementById("btnLeft").onmousedown=()=>input.steer=1;
+document.getElementById("btnRight").onmousedown=()=>input.steer=-1;
+document.getElementById("btnLeft").onmouseup=()=>input.steer=0;
+document.getElementById("btnRight").onmouseup=()=>input.steer=0;
+document.getElementById("btnGas").onmousedown=()=>input.throttle=1;
+document.getElementById("btnGas").onmouseup=()=>input.throttle=0;
+document.getElementById("btnBrake").onmousedown=()=>input.brake=1;
+document.getElementById("btnBrake").onmouseup=()=>input.brake=0;
+document.getElementById("btnHandbrake").onmousedown=()=>input.handbrake=true;
+document.getElementById("btnHandbrake").onmouseup=()=>input.handbrake=false;
+document.getElementById("btnGearUp").onmousedown=()=>input.gearUp=true;
+document.getElementById("btnGearDown").onmousedown=()=>input.gearDown=true;
+</script>
+</body>
+</html>
